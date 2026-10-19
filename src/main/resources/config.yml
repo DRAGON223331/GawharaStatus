@@ -16,7 +16,12 @@ bedrock-port: 44019
 # كل كام ثانية يحدّث الرسالة (أقل حاجة 15). التحديث بيحصل فوراً كمان لما حد يدخل/يخرج.
 update-interval-seconds: 60
 
+# ===== المعلومات اللي تظهر في الإمبد (كلها true/false) =====
+show-ping: true      # متوسط بنج اللاعبين (وأقل/أعلى بنج)
 show-tps: true
+show-mspt: true      # زمن التيك بالمللي ثانية
+show-ram: true       # استهلاك الرام
+show-uptime: true    # السيرفر شغال من إمتى
 show-version: true
 # يعرض أسماء اللي جوا السيرفر
 show-player-names: false
@@ -24,6 +29,12 @@ show-player-names: false
 # لو true: أي إيقاف للسيرفر (stop) يتعرض "بيترستر" بدل "أوفلاين".
 # مفيد لو الاستضافة بتعمل Restart عن طريق stop (زرار الريستارت في اللوحة).
 treat-stop-as-restart: false
+
+# شكل الإمبد (سيب أي حاجة فاضية لو مش عايزها)
+embed:
+  author: "{server}"
+  thumbnail-url: ""   # لينك صورة/لوجو السيرفر (صورة صغيرة فوق اليمين)
+  image-url: ""       # لينك بانر عريض تحت الإمبد
 
 texts:
   title-online: "🟢 {server} — أونلاين"
@@ -36,9 +47,13 @@ texts:
   status-restarting: "🔄 بيترستر"
   status-offline: "❌ مقفول"
   f-status: "الحالة"
-  f-players: "اللاعبين"
-  f-updated: "آخر تحديث"
+  f-players: "👥 اللاعبين"
+  f-updated: "🕒 آخر تحديث"
   f-java: "☕ Java"
   f-bedrock: "📱 Bedrock"
-  f-names: "اللي جوا السيرفر"
+  f-ping: "📶 متوسط البنج"
+  f-ram: "🧠 الرام"
+  f-uptime: "⏳ شغال من"
+  f-version: "🧩 النسخة"
+  f-names: "🎮 اللي جوا السيرفر"
   footer: "لو آخر تحديث قديم أكتر من دقيقتين، يبقى السيرفر واقف"

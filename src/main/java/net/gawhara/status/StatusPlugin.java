@@ -221,6 +221,19 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 + "\",\"inline\":" + inline + "}";
     }
 
+    private static String bar(double frac, int len) {
+        int filled = (int) Math.round(Math.max(0.0, Math.min(1.0, frac)) * len);
+        return "▰".repeat(filled) + "▱".repeat(len - filled);
+    }
+
+    private static String pingDot(int ms) {
+        return ms < 80 ? "🟢" : ms < 150 ? "🟡" : "🔴";
+    }
+
+    private static String tpsDot(double tps) {
+        return tps >= 19.0 ? "🟢" : tps >= 15.0 ? "🟡" : "🔴";
+    }
+
     private Payload buildPayload(State st) {
         FileConfiguration c = getConfig();
         String server = c.getString("server-name", "GawharaSMP");
@@ -249,28 +262,72 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
 
         boolean online = st == State.ONLINE;
         List<String> f = new ArrayList<>();
+
+        // --- الصف الأول: الحالة / اللاعبين / آخر تحديث
         f.add(field(c.getString("texts.f-status", "الحالة"), statusText, true));
-        String players = online ? Bukkit.getOnlinePlayers().size() + " / " + Bukkit.getMaxPlayers() : "-";
-        f.add(field(c.getString("texts.f-players", "اللاعبين"), "**" + players + "**", true));
-        f.add(field(c.getString("texts.f-updated", "آخر تحديث"),
+        int count = Bukkit.getOnlinePlayers().size();
+        int max = Math.max(1, Bukkit.getMaxPlayers());
+        if (online) {
+            f.add(field(c.getString("texts.f-players", "👥 اللاعبين"),
+                    "**" + count + " / " + max + "**\n" + bar((double) count / max, 10), true));
+        } else {
+            f.add(field(c.getString("texts.f-players", "👥 اللاعبين"), "-", true));
+        }
+        f.add(field(c.getString("texts.f-updated", "🕒 آخر تحديث"),
                 "<t:" + (System.currentTimeMillis() / 1000L) + ":R>", true));
-        if (online && c.getBoolean("show-tps", true)) {
-            double tps = Math.min(20.0, Bukkit.getTPS()[0]);
-            f.add(field("TPS", String.format(Locale.ROOT, "%.1f", tps), true));
+
+        if (online) {
+            // --- الأداء
+            if (c.getBoolean("show-ping", true)) {
+                int sum = 0;
+                int best = Integer.MAX_VALUE;
+                int worst = 0;
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    int ping = Math.max(0, p.getPing());
+                    sum += ping;
+                    best = Math.min(best, ping);
+                    worst = Math.max(worst, ping);
+                }
+                String pingText = count == 0 ? "-" : pingDot(sum / count) + " **" + (sum / count) + "ms**\n`"
+                        + best + " ~ " + worst + "ms`";
+                f.add(field(c.getString("texts.f-ping", "📶 متوسط البنج"), pingText, true));
+            }
+            if (c.getBoolean("show-tps", true)) {
+                double tps = Math.min(20.0, Bukkit.getTPS()[0]);
+                f.add(field("⚡ TPS", tpsDot(tps) + " **" + String.format(Locale.ROOT, "%.1f", tps) + "** / 20", true));
+            }
+            if (c.getBoolean("show-mspt", true)) {
+                double mspt = Bukkit.getAverageTickTime();
+                f.add(field("⏱️ MSPT", String.format(Locale.ROOT, "**%.1f** ms", mspt), true));
+            }
+            if (c.getBoolean("show-ram", true)) {
+                Runtime rt = Runtime.getRuntime();
+                long usedMb = (rt.totalMemory() - rt.freeMemory()) / 1048576L;
+                long maxMb = rt.maxMemory() / 1048576L;
+                f.add(field(c.getString("texts.f-ram", "🧠 الرام"),
+                        "**" + usedMb + " / " + maxMb + " MB**\n" + bar(maxMb > 0 ? (double) usedMb / maxMb : 0, 10), true));
+            }
+            if (c.getBoolean("show-uptime", true)) {
+                long startMs = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
+                f.add(field(c.getString("texts.f-uptime", "⏳ شغال من"), "<t:" + (startMs / 1000L) + ":R>", true));
+            }
+            if (c.getBoolean("show-version", true)) {
+                f.add(field(c.getString("texts.f-version", "🧩 النسخة"), "`" + Bukkit.getMinecraftVersion() + "`", true));
+            }
         }
-        if (online && c.getBoolean("show-version", true)) {
-            f.add(field("Version", Bukkit.getMinecraftVersion(), true));
-        }
-        f.add(field(c.getString("texts.f-java", "Java"), "`" + c.getString("java-ip", "") + "`", false));
-        f.add(field(c.getString("texts.f-bedrock", "Bedrock"),
-                "`" + c.getString("bedrock-ip", "") + "` : `" + c.getInt("bedrock-port", 19132) + "`", false));
+
+        // --- طريقة الدخول
+        f.add(field(c.getString("texts.f-java", "☕ Java"), "```" + c.getString("java-ip", "") + "```", true));
+        f.add(field(c.getString("texts.f-bedrock", "📱 Bedrock"),
+                "```" + c.getString("bedrock-ip", "") + "\nPort: " + c.getInt("bedrock-port", 19132) + "```", true));
+
         if (online && c.getBoolean("show-player-names", false)) {
             List<String> names = new ArrayList<>();
             for (Player p : Bukkit.getOnlinePlayers()) {
-                names.add(p.getName());
+                names.add("`" + p.getName() + "`");
             }
             if (!names.isEmpty()) {
-                f.add(field(c.getString("texts.f-names", "اللي جوا السيرفر"), String.join("، ", names), false));
+                f.add(field(c.getString("texts.f-names", "🎮 اللي جوا السيرفر"), String.join("  ", names), false));
             }
         }
 
@@ -281,6 +338,19 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
         embed.append("\"color\":").append(color).append(',');
         embed.append("\"fields\":[").append(String.join(",", f)).append("],");
+        String thumb = c.getString("embed.thumbnail-url", "");
+        if (!thumb.isBlank()) {
+            embed.append("\"thumbnail\":{\"url\":\"").append(jsonEscape(thumb)).append("\"},");
+        }
+        String image = c.getString("embed.image-url", "");
+        if (!image.isBlank()) {
+            embed.append("\"image\":{\"url\":\"").append(jsonEscape(image)).append("\"},");
+        }
+        String author = c.getString("embed.author", "");
+        if (!author.isBlank()) {
+            embed.append("\"author\":{\"name\":\"").append(jsonEscape(author.replace("{server}", server)))
+                    .append("\"},");
+        }
         String footer = c.getString("texts.footer", "");
         if (!footer.isBlank()) {
             embed.append("\"footer\":{\"text\":\"").append(jsonEscape(footer)).append("\"},");
