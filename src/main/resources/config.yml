@@ -1,11 +1,15 @@
 # ===== GawharaStatus =====
-# بيبعت رسالة واحدة في روم ديسكورد وبيعدّلها نفسها (مش بيعمل رسايل جديدة).
-# الحالات: 🟢 أونلاين | 🟠 بيترستر | 🔴 أوفلاين
+# ترسل الإضافة رسالة واحدة في قناة ديسكورد ثم تعدّلها بنفسها (دون إنشاء رسائل جديدة).
+# الحالات: 🟢 يعمل | 🟠 جارٍ إعادة التشغيل | 🔴 متوقف
+#
+# القاعدة: إذا أُغلق الخادم بأمر إيقاف عادي (stop) تظهر الحالة «متوقف»،
+# وعند تشغيله من جديد تتحول الحالة تلقائيًا إلى «يعمل».
+# أما «جارٍ إعادة التشغيل» فلا تظهر إلا عند تنفيذ الأمر restart.
 
 discord:
-  # Webhook الروم العلنية: إعدادات الروم > Integrations > Webhooks > New Webhook > Copy Webhook URL
+  # رابط Webhook للقناة العلنية: إعدادات القناة > التكاملات > Webhooks > Webhook جديد > نسخ الرابط
   webhook-url: ""
-  username: "GawharaSMP Status"
+  username: "حالة خادم GawharaSMP"
   avatar-url: ""
 
 server-name: "GawharaSMP"
@@ -13,47 +17,46 @@ java-ip: "gawhara.play.hosting"
 bedrock-ip: "gawhara.play.hosting"
 bedrock-port: 44019
 
-# كل كام ثانية يحدّث الرسالة (أقل حاجة 15). التحديث بيحصل فوراً كمان لما حد يدخل/يخرج.
+# عدد الثواني بين كل تحديث للرسالة (الحد الأدنى 15). ويُجرى تحديث فوري أيضًا عند دخول لاعب أو خروجه.
 update-interval-seconds: 60
 
-# ===== المعلومات اللي تظهر في الإمبد (كلها true/false) =====
-show-ping: true      # متوسط بنج اللاعبين (وأقل/أعلى بنج)
-show-tps: true
-show-mspt: true      # زمن التيك بالمللي ثانية
-show-ram: true       # استهلاك الرام
-show-uptime: true    # السيرفر شغال من إمتى
-show-version: true
-# يعرض أسماء اللي جوا السيرفر
+# ===== المعلومات الظاهرة في الرسالة (القيم: true أو false) =====
+show-ping: true      # متوسط زمن استجابة اللاعبين (وأقله وأعلاه)
+show-tps: true       # معدل التحديث في الثانية
+show-mspt: true      # زمن الدورة الواحدة بالمللي ثانية
+show-ram: true       # استهلاك الذاكرة
+show-uptime: true    # مدة تشغيل الخادم
+show-version: true   # إصدار الخادم
+# عرض أسماء المتواجدين داخل الخادم
 show-player-names: false
 
-# لو true: أي إيقاف للسيرفر (stop) يتعرض "بيترستر" بدل "أوفلاين".
-# مفيد لو الاستضافة بتعمل Restart عن طريق stop (زرار الريستارت في اللوحة).
+# (لم يعد له تأثير) أصبح الإيقاف العادي يُعرض دائمًا «متوقف».
 treat-stop-as-restart: false
 
-# شكل الإمبد (سيب أي حاجة فاضية لو مش عايزها)
+# شكل الرسالة (اترك الحقل فارغًا إن لم تكن بحاجة إليه)
 embed:
   author: "{server}"
-  thumbnail-url: ""   # لينك صورة/لوجو السيرفر (صورة صغيرة فوق اليمين)
-  image-url: ""       # لينك بانر عريض تحت الإمبد
+  thumbnail-url: ""   # رابط صورة أو شعار الخادم (صورة صغيرة في أعلى الجهة)
+  image-url: ""       # رابط لافتة عريضة أسفل الرسالة
 
 texts:
-  title-online: "🟢 {server} — أونلاين"
-  title-restarting: "🟠 {server} — بيترستر"
-  title-offline: "🔴 {server} — أوفلاين"
-  desc-online: "السيرفر شغال وتقدر تدخل دلوقتي ✅"
-  desc-restarting: "السيرفر بيترستر دلوقتي، استنى دقيقة وارجع 🔄"
-  desc-offline: "السيرفر مقفول حالياً ❌"
-  status-online: "✅ شغال"
-  status-restarting: "🔄 بيترستر"
-  status-offline: "❌ مقفول"
+  title-online: "🟢 {server} — يعمل"
+  title-restarting: "🟠 {server} — جارٍ إعادة التشغيل"
+  title-offline: "🔴 {server} — متوقف"
+  desc-online: "الخادم يعمل ويمكنك الدخول الآن ✅"
+  desc-restarting: "الخادم قيد إعادة التشغيل، انتظر دقيقة ثم عُد 🔄"
+  desc-offline: "الخادم متوقف حاليًا ❌"
+  status-online: "✅ يعمل"
+  status-restarting: "🔄 جارٍ إعادة التشغيل"
+  status-offline: "❌ متوقف"
   f-status: "الحالة"
-  f-players: "👥 اللاعبين"
+  f-players: "👥 اللاعبون"
   f-updated: "🕒 آخر تحديث"
   f-java: "☕ Java"
   f-bedrock: "📱 Bedrock"
-  f-ping: "📶 متوسط البنج"
-  f-ram: "🧠 الرام"
-  f-uptime: "⏳ شغال من"
-  f-version: "🧩 النسخة"
-  f-names: "🎮 اللي جوا السيرفر"
-  footer: "لو آخر تحديث قديم أكتر من دقيقتين، يبقى السيرفر واقف"
+  f-ping: "📶 متوسط زمن الاستجابة"
+  f-ram: "🧠 الذاكرة"
+  f-uptime: "⏳ مدة التشغيل"
+  f-version: "🧩 الإصدار"
+  f-names: "🎮 المتواجدون في الخادم"
+  footer: "إذا مرّ على آخر تحديث أكثر من دقيقتين فالخادم متوقف"

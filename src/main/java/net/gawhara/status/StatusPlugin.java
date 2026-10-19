@@ -34,9 +34,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * GawharaStatus - بيعرض حالة السيرفر في روم ديسكورد (رسالة واحدة بتتعدل).
- * ملحوظة: البلجن جوه السيرفر، فلو السيرفر وقع فجأة (كراش) مش هيقدر يكتب "أوفلاين".
- * عشان كده الرسالة فيها "آخر تحديث" بيتحدث لوحده، ولو بقى قديم يبقى السيرفر واقف.
+ * GawharaStatus - تعرض حالة الخادم في قناة ديسكورد (رسالة واحدة تُعدَّل تلقائيًا).
+ * ملاحظة: الإضافة تعمل داخل الخادم، فإذا انهار فجأة (كراش) فلن تستطيع كتابة «متوقف».
+ * لذلك تتضمن الرسالة «آخر تحديث» يتجدد تلقائيًا، فإذا أصبح قديمًا فالخادم متوقف.
  */
 public final class StatusPlugin extends JavaPlugin implements Listener, TabExecutor {
 
@@ -76,7 +76,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             getCommand("serverstatus").setTabCompleter(this);
         }
         startTimer();
-        // أول تحديث بعد ما السيرفر يخلّص تحميل
+        // أول تحديث بعد اكتمال تحميل الخادم (تتحول الحالة إلى «يعمل»)
         Bukkit.getScheduler().runTaskLater(this, () -> push(State.ONLINE), 40L);
     }
 
@@ -86,10 +86,10 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         if (timer != null) {
             timer.cancel();
         }
-        State st = (restartRequested || getConfig().getBoolean("treat-stop-as-restart", false))
-                ? State.RESTARTING : State.OFFLINE;
+        // الإيقاف العادي (stop) = «متوقف». «إعادة التشغيل» لا تظهر إلا عند تنفيذ الأمر restart.
+        State st = restartRequested ? State.RESTARTING : State.OFFLINE;
         Payload last = buildPayload(st);
-        // خلّص أي طلب شغال، وبعدين ابعت الحالة الأخيرة وانت مستني (السيرفر بيقفل)
+        // إنهاء أي طلب جارٍ، ثم إرسال الحالة الأخيرة مع الانتظار (الخادم يُغلق)
         io.shutdown();
         try {
             io.awaitTermination(5, TimeUnit.SECONDS);
@@ -122,7 +122,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             getDataFolder().mkdirs();
             y.save(stateFile);
         } catch (IOException ex) {
-            getLogger().warning("تعذر حفظ state.yml: " + ex.getMessage());
+            getLogger().warning("تعذّر حفظ ملف state.yml: " + ex.getMessage());
         }
     }
 
@@ -165,7 +165,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
     }
 
-    /** تحديث بعد ثانيتين من دخول/خروج لاعب (بدون ما نزحم ديسكورد). */
+    /** تحديث بعد ثانيتين من دخول لاعب أو خروجه (دون إزعاج ديسكورد بطلبات كثيرة). */
     private void updateSoon() {
         if (shuttingDown || !isEnabled() || updatePending) {
             return;
@@ -182,7 +182,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     // ---------------------------------------------------------------- build + send
 
     private void push(State st) {
-        Payload p = buildPayload(st); // على الـ main thread
+        Payload p = buildPayload(st); // على الخيط الرئيسي
         if (io.isShutdown()) {
             return;
         }
@@ -243,19 +243,19 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         String statusText;
         int color;
         if (st == State.ONLINE) {
-            title = c.getString("texts.title-online", "🟢 {server} — أونلاين");
+            title = c.getString("texts.title-online", "🟢 {server} — يعمل");
             desc = c.getString("texts.desc-online", "");
-            statusText = c.getString("texts.status-online", "✅ شغال");
+            statusText = c.getString("texts.status-online", "✅ يعمل");
             color = 5763719;
         } else if (st == State.RESTARTING) {
-            title = c.getString("texts.title-restarting", "🟠 {server} — بيترستر");
+            title = c.getString("texts.title-restarting", "🟠 {server} — جارٍ إعادة التشغيل");
             desc = c.getString("texts.desc-restarting", "");
-            statusText = c.getString("texts.status-restarting", "🔄 بيترستر");
+            statusText = c.getString("texts.status-restarting", "🔄 جارٍ إعادة التشغيل");
             color = 15105570;
         } else {
-            title = c.getString("texts.title-offline", "🔴 {server} — أوفلاين");
+            title = c.getString("texts.title-offline", "🔴 {server} — متوقف");
             desc = c.getString("texts.desc-offline", "");
-            statusText = c.getString("texts.status-offline", "❌ مقفول");
+            statusText = c.getString("texts.status-offline", "❌ متوقف");
             color = 15548997;
         }
         title = title.replace("{server}", server);
@@ -263,15 +263,15 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         boolean online = st == State.ONLINE;
         List<String> f = new ArrayList<>();
 
-        // --- الصف الأول: الحالة / اللاعبين / آخر تحديث
+        // --- الصف الأول: الحالة / اللاعبون / آخر تحديث
         f.add(field(c.getString("texts.f-status", "الحالة"), statusText, true));
         int count = Bukkit.getOnlinePlayers().size();
         int max = Math.max(1, Bukkit.getMaxPlayers());
         if (online) {
-            f.add(field(c.getString("texts.f-players", "👥 اللاعبين"),
+            f.add(field(c.getString("texts.f-players", "👥 اللاعبون"),
                     "**" + count + " / " + max + "**\n" + bar((double) count / max, 10), true));
         } else {
-            f.add(field(c.getString("texts.f-players", "👥 اللاعبين"), "-", true));
+            f.add(field(c.getString("texts.f-players", "👥 اللاعبون"), "-", true));
         }
         f.add(field(c.getString("texts.f-updated", "🕒 آخر تحديث"),
                 "<t:" + (System.currentTimeMillis() / 1000L) + ":R>", true));
@@ -288,38 +288,38 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                     best = Math.min(best, ping);
                     worst = Math.max(worst, ping);
                 }
-                String pingText = count == 0 ? "-" : pingDot(sum / count) + " **" + (sum / count) + "ms**\n`"
-                        + best + " ~ " + worst + "ms`";
-                f.add(field(c.getString("texts.f-ping", "📶 متوسط البنج"), pingText, true));
+                String pingText = count == 0 ? "-" : pingDot(sum / count) + " **" + (sum / count) + " مللي ثانية**\n`"
+                        + best + " ~ " + worst + " مللي ثانية`";
+                f.add(field(c.getString("texts.f-ping", "📶 متوسط زمن الاستجابة"), pingText, true));
             }
             if (c.getBoolean("show-tps", true)) {
                 double tps = Math.min(20.0, Bukkit.getTPS()[0]);
-                f.add(field("⚡ TPS", tpsDot(tps) + " **" + String.format(Locale.ROOT, "%.1f", tps) + "** / 20", true));
+                f.add(field("⚡ معدل التحديث (TPS)", tpsDot(tps) + " **" + String.format(Locale.ROOT, "%.1f", tps) + "** / 20", true));
             }
             if (c.getBoolean("show-mspt", true)) {
                 double mspt = Bukkit.getAverageTickTime();
-                f.add(field("⏱️ MSPT", String.format(Locale.ROOT, "**%.1f** ms", mspt), true));
+                f.add(field("⏱️ زمن الدورة (MSPT)", String.format(Locale.ROOT, "**%.1f** مللي ثانية", mspt), true));
             }
             if (c.getBoolean("show-ram", true)) {
                 Runtime rt = Runtime.getRuntime();
                 long usedMb = (rt.totalMemory() - rt.freeMemory()) / 1048576L;
                 long maxMb = rt.maxMemory() / 1048576L;
-                f.add(field(c.getString("texts.f-ram", "🧠 الرام"),
-                        "**" + usedMb + " / " + maxMb + " MB**\n" + bar(maxMb > 0 ? (double) usedMb / maxMb : 0, 10), true));
+                f.add(field(c.getString("texts.f-ram", "🧠 الذاكرة"),
+                        "**" + usedMb + " / " + maxMb + " ميغابايت**\n" + bar(maxMb > 0 ? (double) usedMb / maxMb : 0, 10), true));
             }
             if (c.getBoolean("show-uptime", true)) {
                 long startMs = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
-                f.add(field(c.getString("texts.f-uptime", "⏳ شغال من"), "<t:" + (startMs / 1000L) + ":R>", true));
+                f.add(field(c.getString("texts.f-uptime", "⏳ مدة التشغيل"), "<t:" + (startMs / 1000L) + ":R>", true));
             }
             if (c.getBoolean("show-version", true)) {
-                f.add(field(c.getString("texts.f-version", "🧩 النسخة"), "`" + Bukkit.getMinecraftVersion() + "`", true));
+                f.add(field(c.getString("texts.f-version", "🧩 الإصدار"), "`" + Bukkit.getMinecraftVersion() + "`", true));
             }
         }
 
         // --- طريقة الدخول
         f.add(field(c.getString("texts.f-java", "☕ Java"), "```" + c.getString("java-ip", "") + "```", true));
         f.add(field(c.getString("texts.f-bedrock", "📱 Bedrock"),
-                "```" + c.getString("bedrock-ip", "") + "\nPort: " + c.getInt("bedrock-port", 19132) + "```", true));
+                "```" + c.getString("bedrock-ip", "") + "\nالمنفذ: " + c.getInt("bedrock-port", 19132) + "```", true));
 
         if (online && c.getBoolean("show-player-names", false)) {
             List<String> names = new ArrayList<>();
@@ -327,7 +327,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 names.add("`" + p.getName() + "`");
             }
             if (!names.isEmpty()) {
-                f.add(field(c.getString("texts.f-names", "🎮 اللي جوا السيرفر"), String.join("  ", names), false));
+                f.add(field(c.getString("texts.f-names", "🎮 المتواجدون في الخادم"), String.join("  ", names), false));
             }
         }
 
@@ -358,7 +358,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         embed.append("\"timestamp\":\"").append(Instant.now()).append('"');
 
         StringBuilder json = new StringBuilder("{");
-        json.append("\"username\":\"").append(jsonEscape(c.getString("discord.username", "GawharaSMP Status")))
+        json.append("\"username\":\"").append(jsonEscape(c.getString("discord.username", "حالة خادم GawharaSMP")))
                 .append("\",");
         String avatar = c.getString("discord.avatar-url", "");
         if (!avatar.isBlank()) {
@@ -374,7 +374,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         return new Payload(url, json.toString());
     }
 
-    /** أول مفتاح "id" على مستوى الـ JSON الرئيسي (id الرسالة). */
+    /** أول مفتاح "id" على المستوى الرئيسي لـ JSON (معرّف الرسالة). */
     static String topLevelId(String json) {
         int depth = 0;
         int i = 0;
@@ -428,7 +428,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         if (p.url().isBlank() || !p.url().startsWith("https://")) {
             if (!warnedNoUrl) {
                 warnedNoUrl = true;
-                getLogger().warning("discord.webhook-url فاضي أو غلط في config.yml");
+                getLogger().warning("الحقل discord.webhook-url فارغ أو غير صحيح في ملف config.yml");
             }
             return;
         }
@@ -442,11 +442,11 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                     return;
                 }
                 if (r.statusCode() == 404) {
-                    // الرسالة اتمسحت: هنبعت واحدة جديدة
+                    // حُذفت الرسالة: سنرسل رسالة جديدة
                     messageId = "";
                     saveState();
                 } else {
-                    getLogger().warning("Discord edit فشل: HTTP " + r.statusCode() + " " + r.body());
+                    getLogger().warning("فشل تعديل رسالة Discord: HTTP " + r.statusCode() + " " + r.body());
                     return;
                 }
             }
@@ -461,14 +461,14 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                     saveState();
                 }
             } else {
-                getLogger().warning("Discord post فشل: HTTP " + r.statusCode() + " " + r.body());
+                getLogger().warning("فشل إرسال رسالة Discord: HTTP " + r.statusCode() + " " + r.body());
             }
         } catch (IOException ex) {
-            getLogger().warning("Discord فشل: " + ex.getMessage());
+            getLogger().warning("تعذّر الاتصال بـ Discord: " + ex.getMessage());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (IllegalArgumentException ex) {
-            getLogger().warning("discord.webhook-url غير صحيح: " + ex.getMessage());
+            getLogger().warning("الرابط discord.webhook-url غير صحيح: " + ex.getMessage());
         }
     }
 
@@ -477,7 +477,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission("gawharastatus.admin")) {
-            sender.sendMessage(Component.text("معندكش صلاحية."));
+            sender.sendMessage(Component.text("ليست لديك صلاحية لتنفيذ هذا الأمر."));
             return true;
         }
         String sub = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "refresh";
@@ -487,13 +487,13 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 warnedNoUrl = false;
                 startTimer();
                 push(State.ONLINE);
-                sender.sendMessage(Component.text("تم إعادة تحميل الإعدادات وتحديث الحالة."));
+                sender.sendMessage(Component.text("تمت إعادة تحميل الإعدادات وتحديث الحالة."));
             }
             case "reset" -> {
                 messageId = "";
                 saveState();
                 push(State.ONLINE);
-                sender.sendMessage(Component.text("هيتبعت رسالة جديدة في الروم."));
+                sender.sendMessage(Component.text("سيتم إرسال رسالة جديدة في القناة."));
             }
             default -> {
                 push(State.ONLINE);
