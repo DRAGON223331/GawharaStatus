@@ -1,0 +1,44 @@
+# ===== GawharaStatus =====
+# بيبعت رسالة واحدة في روم ديسكورد وبيعدّلها نفسها (مش بيعمل رسايل جديدة).
+# الحالات: 🟢 أونلاين | 🟠 بيترستر | 🔴 أوفلاين
+
+discord:
+  # Webhook الروم العلنية: إعدادات الروم > Integrations > Webhooks > New Webhook > Copy Webhook URL
+  webhook-url: ""
+  username: "GawharaSMP Status"
+  avatar-url: ""
+
+server-name: "GawharaSMP"
+java-ip: "gawhara.play.hosting"
+bedrock-ip: "gawhara.play.hosting"
+bedrock-port: 44019
+
+# كل كام ثانية يحدّث الرسالة (أقل حاجة 15). التحديث بيحصل فوراً كمان لما حد يدخل/يخرج.
+update-interval-seconds: 60
+
+show-tps: true
+show-version: true
+# يعرض أسماء اللي جوا السيرفر
+show-player-names: false
+
+# لو true: أي إيقاف للسيرفر (stop) يتعرض "بيترستر" بدل "أوفلاين".
+# مفيد لو الاستضافة بتعمل Restart عن طريق stop (زرار الريستارت في اللوحة).
+treat-stop-as-restart: false
+
+texts:
+  title-online: "🟢 {server} — أونلاين"
+  title-restarting: "🟠 {server} — بيترستر"
+  title-offline: "🔴 {server} — أوفلاين"
+  desc-online: "السيرفر شغال وتقدر تدخل دلوقتي ✅"
+  desc-restarting: "السيرفر بيترستر دلوقتي، استنى دقيقة وارجع 🔄"
+  desc-offline: "السيرفر مقفول حالياً ❌"
+  status-online: "✅ شغال"
+  status-restarting: "🔄 بيترستر"
+  status-offline: "❌ مقفول"
+  f-status: "الحالة"
+  f-players: "اللاعبين"
+  f-updated: "آخر تحديث"
+  f-java: "☕ Java"
+  f-bedrock: "📱 Bedrock"
+  f-names: "اللي جوا السيرفر"
+  footer: "لو آخر تحديث قديم أكتر من دقيقتين، يبقى السيرفر واقف"

@@ -1,0 +1,16 @@
+name: GawharaStatus
+version: 1.0.0
+main: net.gawhara.status.StatusPlugin
+api-version: '26.1'
+author: GawharaSMP
+description: حالة السيرفر العلنية في ديسكورد (أونلاين / بيترستر / أوفلاين + عدد اللاعبين)
+commands:
+  serverstatus:
+    description: تحديث أو إعادة تحميل حالة السيرفر
+    usage: /serverstatus [refresh|reload|reset]
+    aliases: [gstatus]
+    permission: gawharastatus.admin
+permissions:
+  gawharastatus.admin:
+    description: التحكم في بلجن الحالة
+    default: op
