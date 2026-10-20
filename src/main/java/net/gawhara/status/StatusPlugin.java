@@ -19,6 +19,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -26,6 +27,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -34,9 +36,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * GawharaStatus - تعرض حالة الخادم في قناة ديسكورد (رسالة واحدة تُعدَّل تلقائيًا).
- * ملاحظة: الإضافة تعمل داخل الخادم، فإذا انهار فجأة (كراش) فلن تستطيع كتابة «متوقف».
- * لذلك تتضمن الرسالة «آخر تحديث» يتجدد تلقائيًا، فإذا أصبح قديمًا فالخادم متوقف.
+ * GawharaStatus - بيعرض حالة السيرفر في روم ديسكورد (رسالة واحدة بتتعدل).
+ * ملحوظة: البلجن جوه السيرفر، فلو السيرفر وقع فجأة (كراش) مش هيقدر يكتب "أوفلاين".
+ * عشان كده الرسالة فيها "آخر تحديث" بيتحدث لوحده، ولو بقى قديم يبقى السيرفر واقف.
  */
 public final class StatusPlugin extends JavaPlugin implements Listener, TabExecutor {
 
@@ -61,6 +63,8 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     private volatile boolean shuttingDown;
     private boolean updatePending;
     private boolean warnedNoUrl;
+    private String peakDate = "";
+    private int peakCount;
     private BukkitTask timer;
 
     // ---------------------------------------------------------------- lifecycle
@@ -76,7 +80,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             getCommand("serverstatus").setTabCompleter(this);
         }
         startTimer();
-        // أول تحديث بعد اكتمال تحميل الخادم (تتحول الحالة إلى «يعمل»)
+        // أول تحديث بعد ما السيرفر يخلّص تحميل
         Bukkit.getScheduler().runTaskLater(this, () -> push(State.ONLINE), 40L);
     }
 
@@ -86,10 +90,10 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         if (timer != null) {
             timer.cancel();
         }
-        // الإيقاف العادي (stop) = «متوقف». «إعادة التشغيل» لا تظهر إلا عند تنفيذ الأمر restart.
-        State st = restartRequested ? State.RESTARTING : State.OFFLINE;
+        State st = (restartRequested || getConfig().getBoolean("treat-stop-as-restart", false))
+                ? State.RESTARTING : State.OFFLINE;
         Payload last = buildPayload(st);
-        // إنهاء أي طلب جارٍ، ثم إرسال الحالة الأخيرة مع الانتظار (الخادم يُغلق)
+        // خلّص أي طلب شغال، وبعدين ابعت الحالة الأخيرة وانت مستني (السيرفر بيقفل)
         io.shutdown();
         try {
             io.awaitTermination(5, TimeUnit.SECONDS);
@@ -113,16 +117,20 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
         YamlConfiguration y = YamlConfiguration.loadConfiguration(stateFile);
         messageId = y.getString("message-id", "");
+        peakDate = y.getString("peak-date", "");
+        peakCount = y.getInt("peak-count", 0);
     }
 
-    private void saveState() {
+    private synchronized void saveState() {
         YamlConfiguration y = new YamlConfiguration();
         y.set("message-id", messageId);
+        y.set("peak-date", peakDate);
+        y.set("peak-count", peakCount);
         try {
             getDataFolder().mkdirs();
             y.save(stateFile);
         } catch (IOException ex) {
-            getLogger().warning("تعذّر حفظ ملف state.yml: " + ex.getMessage());
+            getLogger().warning("تعذر حفظ state.yml: " + ex.getMessage());
         }
     }
 
@@ -165,7 +173,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
     }
 
-    /** تحديث بعد ثانيتين من دخول لاعب أو خروجه (دون إزعاج ديسكورد بطلبات كثيرة). */
+    /** تحديث بعد ثانيتين من دخول/خروج لاعب (بدون ما نزحم ديسكورد). */
     private void updateSoon() {
         if (shuttingDown || !isEnabled() || updatePending) {
             return;
@@ -182,7 +190,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     // ---------------------------------------------------------------- build + send
 
     private void push(State st) {
-        Payload p = buildPayload(st); // على الخيط الرئيسي
+        Payload p = buildPayload(st); // على الـ main thread
         if (io.isShutdown()) {
             return;
         }
@@ -221,136 +229,146 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 + "\",\"inline\":" + inline + "}";
     }
 
-    private static String bar(double frac, int len) {
-        int filled = (int) Math.round(Math.max(0.0, Math.min(1.0, frac)) * len);
+    private static String bar(int cur, int max) {
+        int len = 10;
+        int filled = max > 0 ? (int) Math.round(cur * (double) len / max) : 0;
+        filled = Math.max(0, Math.min(len, filled));
+        if (cur > 0 && filled == 0) {
+            filled = 1;
+        }
         return "▰".repeat(filled) + "▱".repeat(len - filled);
     }
 
-    private static String pingDot(int ms) {
-        return ms < 80 ? "🟢" : ms < 150 ? "🟡" : "🔴";
+    private static String tpsDot(double tps) {
+        if (tps >= 19.0) {
+            return "🟢";
+        }
+        return tps >= 15.0 ? "🟡" : "🔴";
     }
 
-    private static String tpsDot(double tps) {
-        return tps >= 19.0 ? "🟢" : tps >= 15.0 ? "🟡" : "🔴";
+    private void updatePeak(int now) {
+        String today = LocalDate.now().toString();
+        if (!today.equals(peakDate)) {
+            peakDate = today;
+            peakCount = now;
+            saveStateAsync();
+        } else if (now > peakCount) {
+            peakCount = now;
+            saveStateAsync();
+        }
+    }
+
+    private void saveStateAsync() {
+        if (!io.isShutdown()) {
+            io.execute(this::saveState);
+        }
     }
 
     private Payload buildPayload(State st) {
         FileConfiguration c = getConfig();
         String server = c.getString("server-name", "GawharaSMP");
+        long now = System.currentTimeMillis() / 1000L;
 
         String title;
         String desc;
         String statusText;
         int color;
         if (st == State.ONLINE) {
-            title = c.getString("texts.title-online", "🟢 {server} — يعمل");
+            title = c.getString("texts.title-online", "🟢 {server} — أونلاين");
             desc = c.getString("texts.desc-online", "");
-            statusText = c.getString("texts.status-online", "✅ يعمل");
-            color = 5763719;
+            statusText = c.getString("texts.status-online", "✅ شغال");
+            color = 0x57F287;
         } else if (st == State.RESTARTING) {
-            title = c.getString("texts.title-restarting", "🟠 {server} — جارٍ إعادة التشغيل");
+            title = c.getString("texts.title-restarting", "🟠 {server} — بيترستر");
             desc = c.getString("texts.desc-restarting", "");
-            statusText = c.getString("texts.status-restarting", "🔄 جارٍ إعادة التشغيل");
-            color = 15105570;
+            statusText = c.getString("texts.status-restarting", "🔄 بيترستر");
+            color = 0xF5A623;
         } else {
-            title = c.getString("texts.title-offline", "🔴 {server} — متوقف");
+            title = c.getString("texts.title-offline", "🔴 {server} — أوفلاين");
             desc = c.getString("texts.desc-offline", "");
-            statusText = c.getString("texts.status-offline", "❌ متوقف");
-            color = 15548997;
+            statusText = c.getString("texts.status-offline", "❌ مقفول");
+            color = 0xED4245;
         }
         title = title.replace("{server}", server);
 
         boolean online = st == State.ONLINE;
         List<String> f = new ArrayList<>();
+        f.add(field(c.getString("texts.f-status", "الحالة"), "**" + statusText + "**", true));
 
-        // --- الصف الأول: الحالة / اللاعبون / آخر تحديث
-        f.add(field(c.getString("texts.f-status", "الحالة"), statusText, true));
-        int count = Bukkit.getOnlinePlayers().size();
-        int max = Math.max(1, Bukkit.getMaxPlayers());
+        int count = 0;
+        int max = 0;
         if (online) {
-            f.add(field(c.getString("texts.f-players", "👥 اللاعبون"),
-                    "**" + count + " / " + max + "**\n" + bar((double) count / max, 10), true));
-        } else {
-            f.add(field(c.getString("texts.f-players", "👥 اللاعبون"), "-", true));
-        }
-        f.add(field(c.getString("texts.f-updated", "🕒 آخر تحديث"),
-                "<t:" + (System.currentTimeMillis() / 1000L) + ":R>", true));
-
-        if (online) {
-            // --- الأداء
-            if (c.getBoolean("show-ping", true)) {
-                int sum = 0;
-                int best = Integer.MAX_VALUE;
-                int worst = 0;
-                for (Player p : Bukkit.getOnlinePlayers()) {
-                    int ping = Math.max(0, p.getPing());
-                    sum += ping;
-                    best = Math.min(best, ping);
-                    worst = Math.max(worst, ping);
-                }
-                String pingText = count == 0 ? "-" : pingDot(sum / count) + " **" + (sum / count) + " مللي ثانية**\n`"
-                        + best + " ~ " + worst + " مللي ثانية`";
-                f.add(field(c.getString("texts.f-ping", "📶 متوسط زمن الاستجابة"), pingText, true));
-            }
+            count = Bukkit.getOnlinePlayers().size();
+            max = Bukkit.getMaxPlayers();
+            updatePeak(count);
+            f.add(field(c.getString("texts.f-players", "اللاعبين"),
+                    "`" + bar(count, max) + "`\n**" + count + "** / " + max, true));
             if (c.getBoolean("show-tps", true)) {
                 double tps = Math.min(20.0, Bukkit.getTPS()[0]);
-                f.add(field("⚡ معدل التحديث (TPS)", tpsDot(tps) + " **" + String.format(Locale.ROOT, "%.1f", tps) + "** / 20", true));
-            }
-            if (c.getBoolean("show-mspt", true)) {
-                double mspt = Bukkit.getAverageTickTime();
-                f.add(field("⏱️ زمن الدورة (MSPT)", String.format(Locale.ROOT, "**%.1f** مللي ثانية", mspt), true));
-            }
-            if (c.getBoolean("show-ram", true)) {
-                Runtime rt = Runtime.getRuntime();
-                long usedMb = (rt.totalMemory() - rt.freeMemory()) / 1048576L;
-                long maxMb = rt.maxMemory() / 1048576L;
-                f.add(field(c.getString("texts.f-ram", "🧠 الذاكرة"),
-                        "**" + usedMb + " / " + maxMb + " ميغابايت**\n" + bar(maxMb > 0 ? (double) usedMb / maxMb : 0, 10), true));
-            }
-            if (c.getBoolean("show-uptime", true)) {
-                long startMs = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
-                f.add(field(c.getString("texts.f-uptime", "⏳ مدة التشغيل"), "<t:" + (startMs / 1000L) + ":R>", true));
+                String perf = tpsDot(tps) + " **" + String.format(Locale.ROOT, "%.1f", tps) + "** TPS";
+                if (c.getBoolean("show-mspt", true)) {
+                    perf += "\n" + String.format(Locale.ROOT, "%.1f", Bukkit.getAverageTickTime()) + " ms/tick";
+                }
+                f.add(field(c.getString("texts.f-performance", "الأداء"), perf, true));
             }
             if (c.getBoolean("show-version", true)) {
-                f.add(field(c.getString("texts.f-version", "🧩 الإصدار"), "`" + Bukkit.getMinecraftVersion() + "`", true));
+                f.add(field(c.getString("texts.f-version", "الإصدار"), Bukkit.getMinecraftVersion(), true));
             }
+            if (c.getBoolean("show-uptime", true)) {
+                long startSec = ManagementFactory.getRuntimeMXBean().getStartTime() / 1000L;
+                f.add(field(c.getString("texts.f-uptime", "شغال من"), "<t:" + startSec + ":R>", true));
+            }
+            if (c.getBoolean("show-peak", true)) {
+                f.add(field(c.getString("texts.f-peak", "أعلى عدد النهارده"),
+                        "📈 **" + Math.max(peakCount, count) + "**", true));
+            }
+        } else {
+            f.add(field(c.getString("texts.f-last-seen", "آخر مرة شغال"), "<t:" + now + ":R>", true));
         }
 
-        // --- طريقة الدخول
-        f.add(field(c.getString("texts.f-java", "☕ Java"), "```" + c.getString("java-ip", "") + "```", true));
-        f.add(field(c.getString("texts.f-bedrock", "📱 Bedrock"),
-                "```" + c.getString("bedrock-ip", "") + "\nالمنفذ: " + c.getInt("bedrock-port", 19132) + "```", true));
-
+        String javaIp = c.getString("java-ip", "");
+        String backup = c.getString("java-backup-address", "");
+        String javaVal = "```\n" + javaIp + "\n```";
+        if (!backup.isBlank()) {
+            javaVal += c.getString("texts.backup-label", "↪ عنوان بديل:") + " `" + backup + "`";
+        }
+        f.add(field(c.getString("texts.f-java", "☕ Java"), javaVal, false));
+        if (c.getBoolean("bedrock-enabled", true)) {
+            String bedVal = "```\n" + c.getString("texts.bedrock-address", "العنوان") + ": "
+                    + c.getString("bedrock-ip", "") + "\n" + c.getString("texts.bedrock-port", "البورت") + ": "
+                    + c.getInt("bedrock-port", 19132) + "\n```";
+            f.add(field(c.getString("texts.f-bedrock", "📱 Bedrock"), bedVal, false));
+        }
         if (online && c.getBoolean("show-player-names", false)) {
             List<String> names = new ArrayList<>();
             for (Player p : Bukkit.getOnlinePlayers()) {
-                names.add("`" + p.getName() + "`");
+                names.add(p.getName());
             }
             if (!names.isEmpty()) {
-                f.add(field(c.getString("texts.f-names", "🎮 المتواجدون في الخادم"), String.join("  ", names), false));
+                f.add(field(c.getString("texts.f-names", "اللي جوا السيرفر"),
+                        "```\n" + String.join("، ", names) + "\n```", false));
             }
         }
 
+        String fullDesc = (desc.isBlank() ? "" : "**" + desc + "**\n")
+                + c.getString("texts.updated-prefix", "🕒 آخر تحديث:") + " <t:" + now + ":R>";
+
         StringBuilder embed = new StringBuilder();
         embed.append("\"title\":\"").append(jsonEscape(title)).append("\",");
-        if (!desc.isBlank()) {
-            embed.append("\"description\":\"").append(jsonEscape(desc)).append("\",");
-        }
+        embed.append("\"description\":\"").append(jsonEscape(fullDesc)).append("\",");
         embed.append("\"color\":").append(color).append(',');
-        embed.append("\"fields\":[").append(String.join(",", f)).append("],");
-        String thumb = c.getString("embed.thumbnail-url", "");
-        if (!thumb.isBlank()) {
+        String thumb = c.getString("discord.thumbnail-url", "").trim();
+        if (thumb.isEmpty() && c.getBoolean("discord.use-server-icon", true) && !javaIp.isBlank()) {
+            thumb = "https://api.mcsrvstat.us/icon/" + javaIp;
+        }
+        if (!thumb.isEmpty()) {
             embed.append("\"thumbnail\":{\"url\":\"").append(jsonEscape(thumb)).append("\"},");
         }
-        String image = c.getString("embed.image-url", "");
-        if (!image.isBlank()) {
+        String image = c.getString("discord.image-url", "").trim();
+        if (!image.isEmpty()) {
             embed.append("\"image\":{\"url\":\"").append(jsonEscape(image)).append("\"},");
         }
-        String author = c.getString("embed.author", "");
-        if (!author.isBlank()) {
-            embed.append("\"author\":{\"name\":\"").append(jsonEscape(author.replace("{server}", server)))
-                    .append("\"},");
-        }
+        embed.append("\"fields\":[").append(String.join(",", f)).append("],");
         String footer = c.getString("texts.footer", "");
         if (!footer.isBlank()) {
             embed.append("\"footer\":{\"text\":\"").append(jsonEscape(footer)).append("\"},");
@@ -358,7 +376,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         embed.append("\"timestamp\":\"").append(Instant.now()).append('"');
 
         StringBuilder json = new StringBuilder("{");
-        json.append("\"username\":\"").append(jsonEscape(c.getString("discord.username", "حالة خادم GawharaSMP")))
+        json.append("\"username\":\"").append(jsonEscape(c.getString("discord.username", "GawharaSMP Status")))
                 .append("\",");
         String avatar = c.getString("discord.avatar-url", "");
         if (!avatar.isBlank()) {
@@ -374,7 +392,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         return new Payload(url, json.toString());
     }
 
-    /** أول مفتاح "id" على المستوى الرئيسي لـ JSON (معرّف الرسالة). */
+    /** أول مفتاح "id" على مستوى الـ JSON الرئيسي (id الرسالة). */
     static String topLevelId(String json) {
         int depth = 0;
         int i = 0;
@@ -424,11 +442,37 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 .header("Content-Type", "application/json; charset=utf-8");
     }
 
+    /** بيبعت الطلب، ولو ديسكورد رد 429 (ضغط) بيستنى المدة المطلوبة ويعيد مرة واحدة. */
+    private HttpResponse<String> exec(HttpRequest req) throws IOException, InterruptedException {
+        HttpResponse<String> r = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        if (r.statusCode() == 429) {
+            long waitMs = 1500;
+            String b = r.body() == null ? "" : r.body();
+            int i = b.indexOf("\"retry_after\"");
+            if (i >= 0) {
+                int colon = b.indexOf(':', i);
+                int e = colon + 1;
+                while (colon >= 0 && e < b.length() && (Character.isDigit(b.charAt(e)) || b.charAt(e) == '.'
+                        || b.charAt(e) == ' ')) {
+                    e++;
+                }
+                try {
+                    waitMs = (long) (Double.parseDouble(b.substring(colon + 1, e).trim()) * 1000);
+                } catch (RuntimeException ignored) {
+                    // نفضل على الافتراضي
+                }
+            }
+            Thread.sleep(Math.max(500, Math.min(5000, waitMs)));
+            r = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+        }
+        return r;
+    }
+
     private synchronized void send(Payload p) {
         if (p.url().isBlank() || !p.url().startsWith("https://")) {
             if (!warnedNoUrl) {
                 warnedNoUrl = true;
-                getLogger().warning("الحقل discord.webhook-url فارغ أو غير صحيح في ملف config.yml");
+                getLogger().warning("discord.webhook-url فاضي أو غلط في config.yml");
             }
             return;
         }
@@ -437,23 +481,23 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 HttpRequest edit = base(p.url() + "/messages/" + messageId)
                         .method("PATCH", HttpRequest.BodyPublishers.ofString(p.json(), StandardCharsets.UTF_8))
                         .build();
-                HttpResponse<String> r = HTTP.send(edit, HttpResponse.BodyHandlers.ofString());
+                HttpResponse<String> r = exec(edit);
                 if (r.statusCode() / 100 == 2) {
                     return;
                 }
                 if (r.statusCode() == 404) {
-                    // حُذفت الرسالة: سنرسل رسالة جديدة
+                    // الرسالة اتمسحت: هنبعت واحدة جديدة
                     messageId = "";
                     saveState();
                 } else {
-                    getLogger().warning("فشل تعديل رسالة Discord: HTTP " + r.statusCode() + " " + r.body());
+                    getLogger().warning("Discord edit فشل: HTTP " + r.statusCode() + " " + r.body());
                     return;
                 }
             }
             HttpRequest post = base(p.url() + "?wait=true")
                     .POST(HttpRequest.BodyPublishers.ofString(p.json(), StandardCharsets.UTF_8))
                     .build();
-            HttpResponse<String> r = HTTP.send(post, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> r = exec(post);
             if (r.statusCode() / 100 == 2) {
                 String id = topLevelId(r.body());
                 if (id != null) {
@@ -461,14 +505,14 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                     saveState();
                 }
             } else {
-                getLogger().warning("فشل إرسال رسالة Discord: HTTP " + r.statusCode() + " " + r.body());
+                getLogger().warning("Discord post فشل: HTTP " + r.statusCode() + " " + r.body());
             }
         } catch (IOException ex) {
-            getLogger().warning("تعذّر الاتصال بـ Discord: " + ex.getMessage());
+            getLogger().warning("Discord فشل: " + ex.getMessage());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (IllegalArgumentException ex) {
-            getLogger().warning("الرابط discord.webhook-url غير صحيح: " + ex.getMessage());
+            getLogger().warning("discord.webhook-url غير صحيح: " + ex.getMessage());
         }
     }
 
@@ -477,7 +521,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission("gawharastatus.admin")) {
-            sender.sendMessage(Component.text("ليست لديك صلاحية لتنفيذ هذا الأمر."));
+            sender.sendMessage(Component.text("معندكش صلاحية."));
             return true;
         }
         String sub = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "refresh";
@@ -487,13 +531,13 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 warnedNoUrl = false;
                 startTimer();
                 push(State.ONLINE);
-                sender.sendMessage(Component.text("تمت إعادة تحميل الإعدادات وتحديث الحالة."));
+                sender.sendMessage(Component.text("تم إعادة تحميل الإعدادات وتحديث الحالة."));
             }
             case "reset" -> {
                 messageId = "";
                 saveState();
                 push(State.ONLINE);
-                sender.sendMessage(Component.text("سيتم إرسال رسالة جديدة في القناة."));
+                sender.sendMessage(Component.text("هيتبعت رسالة جديدة في الروم."));
             }
             default -> {
                 push(State.ONLINE);

@@ -1,62 +1,69 @@
-# ===== GawharaStatus =====
-# ترسل الإضافة رسالة واحدة في قناة ديسكورد ثم تعدّلها بنفسها (دون إنشاء رسائل جديدة).
-# الحالات: 🟢 يعمل | 🟠 جارٍ إعادة التشغيل | 🔴 متوقف
-#
-# القاعدة: إذا أُغلق الخادم بأمر إيقاف عادي (stop) تظهر الحالة «متوقف»،
-# وعند تشغيله من جديد تتحول الحالة تلقائيًا إلى «يعمل».
-# أما «جارٍ إعادة التشغيل» فلا تظهر إلا عند تنفيذ الأمر restart.
+# ===== GawharaStatus 1.1 =====
+# بيبعت رسالة واحدة في روم ديسكورد وبيعدّلها نفسها (مش بيعمل رسايل جديدة).
+# الحالات: 🟢 أونلاين | 🟠 بيترستر | 🔴 أوفلاين
 
 discord:
-  # رابط Webhook للقناة العلنية: إعدادات القناة > التكاملات > Webhooks > Webhook جديد > نسخ الرابط
+  # Webhook الروم العلنية: إعدادات الروم > Integrations > Webhooks > New Webhook > Copy Webhook URL
   webhook-url: ""
-  username: "حالة خادم GawharaSMP"
+  username: "GawharaSMP Status"
   avatar-url: ""
+  # صورة صغيرة فوق يمين الرسالة. لو فاضية وuse-server-icon=true بتتجاب أيقونة السيرفر لوحدها.
+  thumbnail-url: ""
+  use-server-icon: true
+  # بانر كبير تحت الرسالة (اختياري)
+  image-url: ""
 
 server-name: "GawharaSMP"
-java-ip: "gawhara.play.hosting"
-bedrock-ip: "gawhara.play.hosting"
-bedrock-port: 44019
 
-# عدد الثواني بين كل تحديث للرسالة (الحد الأدنى 15). ويُجرى تحديث فوري أيضًا عند دخول لاعب أو خروجه.
+# عنوان Java اللي بيدخل بيه اللاعبين
+java-ip: "gawharasmp.tkmc.net"
+# عنوان بديل يتعرض تحت (لو الدومين وقع). سيبه "" لو مش عايزه.
+java-backup-address: "node-de-free-01.tickhosting.com:51008"
+
+# Bedrock: لو الاستضافة مفيهاش بورت UDP خليها false والسطر هيختفي
+bedrock-enabled: true
+bedrock-ip: "gawharasmp.tkmc.net"
+bedrock-port: 51008
+
+# كل كام ثانية يحدّث الرسالة (أقل حاجة 15). التحديث بيحصل فوراً كمان لما حد يدخل/يخرج.
 update-interval-seconds: 60
 
-# ===== المعلومات الظاهرة في الرسالة (القيم: true أو false) =====
-show-ping: true      # متوسط زمن استجابة اللاعبين (وأقله وأعلاه)
-show-tps: true       # معدل التحديث في الثانية
-show-mspt: true      # زمن الدورة الواحدة بالمللي ثانية
-show-ram: true       # استهلاك الذاكرة
-show-uptime: true    # مدة تشغيل الخادم
-show-version: true   # إصدار الخادم
-# عرض أسماء المتواجدين داخل الخادم
+show-tps: true
+show-mspt: true
+show-version: true
+# من إمتى السيرفر شغال
+show-uptime: true
+# أعلى عدد لاعبين النهارده
+show-peak: true
+# يعرض أسماء اللي جوا السيرفر
 show-player-names: false
 
-# (لم يعد له تأثير) أصبح الإيقاف العادي يُعرض دائمًا «متوقف».
+# لو true: أي إيقاف للسيرفر (stop) يتعرض "بيترستر" بدل "أوفلاين".
+# مفيد لو الاستضافة بتعمل Restart عن طريق stop (زرار الريستارت في اللوحة).
 treat-stop-as-restart: false
 
-# شكل الرسالة (اترك الحقل فارغًا إن لم تكن بحاجة إليه)
-embed:
-  author: "{server}"
-  thumbnail-url: ""   # رابط صورة أو شعار الخادم (صورة صغيرة في أعلى الجهة)
-  image-url: ""       # رابط لافتة عريضة أسفل الرسالة
-
 texts:
-  title-online: "🟢 {server} — يعمل"
-  title-restarting: "🟠 {server} — جارٍ إعادة التشغيل"
-  title-offline: "🔴 {server} — متوقف"
-  desc-online: "الخادم يعمل ويمكنك الدخول الآن ✅"
-  desc-restarting: "الخادم قيد إعادة التشغيل، انتظر دقيقة ثم عُد 🔄"
-  desc-offline: "الخادم متوقف حاليًا ❌"
-  status-online: "✅ يعمل"
-  status-restarting: "🔄 جارٍ إعادة التشغيل"
-  status-offline: "❌ متوقف"
+  title-online: "🟢 {server} — أونلاين"
+  title-restarting: "🟠 {server} — بيترستر"
+  title-offline: "🔴 {server} — أوفلاين"
+  desc-online: "السيرفر شغال وتقدر تدخل دلوقتي ✅"
+  desc-restarting: "السيرفر بيترستر دلوقتي، استنى دقيقة وارجع 🔄"
+  desc-offline: "السيرفر مقفول حالياً ❌"
+  status-online: "✅ شغال"
+  status-restarting: "🔄 بيترستر"
+  status-offline: "❌ مقفول"
   f-status: "الحالة"
-  f-players: "👥 اللاعبون"
-  f-updated: "🕒 آخر تحديث"
+  f-players: "👥 اللاعبين"
+  f-performance: "⚡ الأداء"
+  f-version: "🎮 الإصدار"
+  f-uptime: "⏱️ شغال من"
+  f-peak: "🏆 أعلى عدد النهارده"
+  f-last-seen: "🕒 آخر مرة شغال"
   f-java: "☕ Java"
   f-bedrock: "📱 Bedrock"
-  f-ping: "📶 متوسط زمن الاستجابة"
-  f-ram: "🧠 الذاكرة"
-  f-uptime: "⏳ مدة التشغيل"
-  f-version: "🧩 الإصدار"
-  f-names: "🎮 المتواجدون في الخادم"
-  footer: "إذا مرّ على آخر تحديث أكثر من دقيقتين فالخادم متوقف"
+  f-names: "🧑‍🤝‍🧑 اللي جوا السيرفر"
+  bedrock-address: "العنوان"
+  bedrock-port: "البورت"
+  backup-label: "↪ عنوان بديل:"
+  updated-prefix: "🕒 آخر تحديث:"
+  footer: "لو آخر تحديث قديم أكتر من دقيقتين، يبقى السيرفر واقف"
