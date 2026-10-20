@@ -13,6 +13,15 @@ discord:
   # بانر كبير تحت الرسالة (اختياري)
   image-url: ""
 
+# ربط لوحة التحكم (Pterodactyl) عشان CPU/RAM/Disk الحقيقيين ومدة التشغيل.
+# API Key: صورتك فوق يمين اللوحة > API Credentials > Create. سيبه "" لو مش عايز الربط.
+# مهم: الـ Key زي الباسورد، متبعتوش لحد.
+panel:
+  url: "https://tickhosting.com"
+  server-id: "77de1f91"
+  api-key: ""
+  show-disk: true
+
 server-name: "GawharaSMP"
 
 # عنوان Java اللي بيدخل بيه اللاعبين
@@ -26,11 +35,13 @@ bedrock-ip: "gawharasmp.tkmc.net"
 bedrock-port: 51008
 
 # كل كام ثانية يحدّث الرسالة (أقل حاجة 15). التحديث بيحصل فوراً كمان لما حد يدخل/يخرج.
-update-interval-seconds: 60
+update-interval-seconds: 30
 
 show-tps: true
 show-mspt: true
 show-version: true
+# رام الجافا واستهلاك المعالج
+show-resources: true
 # من إمتى السيرفر شغال
 show-uptime: true
 # أعلى عدد لاعبين النهارده
@@ -55,6 +66,8 @@ texts:
   f-status: "الحالة"
   f-players: "👥 اللاعبين"
   f-performance: "⚡ الأداء"
+  f-resources: "📊 الموارد"
+  crash-notice: "⚠️ رجع بعد وقوف مفاجئ، آخر مرة كان شغال:"
   f-version: "🎮 الإصدار"
   f-uptime: "⏱️ شغال من"
   f-peak: "🏆 أعلى عدد النهارده"

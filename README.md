@@ -7,3 +7,4 @@
 - الأوامر: `/serverstatus` (تحديث) | `reload` | `reset` (يبعت رسالة جديدة). الصلاحية: `gawharastatus.admin`
 - لو ترقّي من نسخة قديمة: امسح `config.yml` القديم عشان الشكل الجديد والإعدادات الجديدة تظهر.
 - البناء: JDK 25 + Maven → `mvn clean package` → target/GawharaStatus.jar
+- ربط اللوحة (اختياري): حط `panel.api-key` (من API Credentials) في config.yml عشان CPU/RAM/Disk ومدة التشغيل الحقيقية.

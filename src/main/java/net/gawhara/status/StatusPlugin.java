@@ -19,6 +19,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.io.IOException;
+import com.sun.management.OperatingSystemMXBean;
 import java.lang.management.ManagementFactory;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -44,6 +45,10 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
 
     enum State { ONLINE, RESTARTING, OFFLINE }
 
+    /** آخر أرقام جت من API بتاع اللوحة (Pterodactyl). */
+    record PanelStats(long memBytes, double cpu, long diskBytes, long uptimeMs, long fetchedSec) {
+    }
+
     record Payload(String url, String json) {
     }
 
@@ -65,6 +70,17 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     private boolean warnedNoUrl;
     private String peakDate = "";
     private int peakCount;
+    private volatile boolean running;
+    private volatile long lastBeatSec;
+    private volatile long crashedAtSec;
+    private volatile long crashShownUntilSec;
+    private volatile Payload offlinePayload;
+    private volatile PanelStats panelStats;
+    private volatile long limMemMb = -1;
+    private volatile long limDiskMb = -1;
+    private volatile long limCpu = -1;
+    private volatile boolean warnedPanel;
+    private BukkitTask panelTimer;
     private BukkitTask timer;
 
     // ---------------------------------------------------------------- lifecycle
@@ -79,6 +95,15 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             getCommand("serverstatus").setExecutor(this);
             getCommand("serverstatus").setTabCompleter(this);
         }
+        running = true;
+        saveStateAsync();
+        // شبكة أمان: لو الـ JVM اتقفل من غير ما onDisable يشتغل (SIGTERM / System.exit)
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            Payload p = offlinePayload;
+            if (!shuttingDown && p != null) {
+                send(p);
+            }
+        }, "GawharaStatus-Hook"));
         startTimer();
         // أول تحديث بعد ما السيرفر يخلّص تحميل
         Bukkit.getScheduler().runTaskLater(this, () -> push(State.ONLINE), 40L);
@@ -87,8 +112,12 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
     @Override
     public void onDisable() {
         shuttingDown = true;
+        running = false;
         if (timer != null) {
             timer.cancel();
+        }
+        if (panelTimer != null) {
+            panelTimer.cancel();
         }
         State st = (restartRequested || getConfig().getBoolean("treat-stop-as-restart", false))
                 ? State.RESTARTING : State.OFFLINE;
@@ -101,6 +130,7 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             Thread.currentThread().interrupt();
         }
         send(last);
+        saveState();
     }
 
     private void startTimer() {
@@ -109,6 +139,17 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
         int sec = Math.max(15, getConfig().getInt("update-interval-seconds", 60));
         timer = Bukkit.getScheduler().runTaskTimer(this, () -> push(State.ONLINE), sec * 20L, sec * 20L);
+        if (panelTimer != null) {
+            panelTimer.cancel();
+        }
+        limMemMb = -1;
+        limDiskMb = -1;
+        limCpu = -1;
+        warnedPanel = false;
+        panelStats = null;
+        if (panelEnabled()) {
+            panelTimer = Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::fetchPanel, 20L, sec * 20L);
+        }
     }
 
     private void loadState() {
@@ -119,6 +160,12 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         messageId = y.getString("message-id", "");
         peakDate = y.getString("peak-date", "");
         peakCount = y.getInt("peak-count", 0);
+        lastBeatSec = y.getLong("last-beat", 0L);
+        if (y.getBoolean("running", false) && lastBeatSec > 0) {
+            // السيرفر كان شغال ومقفلش بشكل طبيعي = وقف فجأة (كراش / Kill)
+            crashedAtSec = lastBeatSec;
+            crashShownUntilSec = System.currentTimeMillis() / 1000L + 900;
+        }
     }
 
     private synchronized void saveState() {
@@ -126,6 +173,8 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         y.set("message-id", messageId);
         y.set("peak-date", peakDate);
         y.set("peak-count", peakCount);
+        y.set("running", running);
+        y.set("last-beat", lastBeatSec);
         try {
             getDataFolder().mkdirs();
             y.save(stateFile);
@@ -191,6 +240,10 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
 
     private void push(State st) {
         Payload p = buildPayload(st); // على الـ main thread
+        lastBeatSec = System.currentTimeMillis() / 1000L;
+        offlinePayload = buildPayload(getConfig().getBoolean("treat-stop-as-restart", false)
+                ? State.RESTARTING : State.OFFLINE);
+        saveStateAsync();
         if (io.isShutdown()) {
             return;
         }
@@ -227,6 +280,122 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
         }
         return "{\"name\":\"" + jsonEscape(name) + "\",\"value\":\"" + jsonEscape(value)
                 + "\",\"inline\":" + inline + "}";
+    }
+
+    // ---------------------------------------------------------------- panel API
+
+    private boolean panelEnabled() {
+        FileConfiguration c = getConfig();
+        return !c.getString("panel.api-key", "").isBlank() && !c.getString("panel.server-id", "").isBlank();
+    }
+
+    private HttpRequest.Builder panelReq(String path) {
+        FileConfiguration c = getConfig();
+        String base = c.getString("panel.url", "https://tickhosting.com").trim();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return HttpRequest.newBuilder(URI.create(base + "/api/client/servers/" + c.getString("panel.server-id", "").trim() + path))
+                .timeout(Duration.ofSeconds(8))
+                .header("Authorization", "Bearer " + c.getString("panel.api-key", "").trim())
+                .header("Accept", "application/json");
+    }
+
+    private void panelWarn(String msg) {
+        if (!warnedPanel) {
+            warnedPanel = true;
+            getLogger().warning(msg);
+        }
+    }
+
+    /** أول رقم بعد المفتاح (بدءاً من from)، أو -1 لو مش موجود. */
+    static double num(String json, int from, String key) {
+        int idx = json.indexOf("\"" + key + "\":", from);
+        if (idx < 0) {
+            return -1;
+        }
+        int i = idx + key.length() + 3;
+        while (i < json.length() && json.charAt(i) == ' ') {
+            i++;
+        }
+        int e = i;
+        while (e < json.length() && "0123456789.-eE+".indexOf(json.charAt(e)) >= 0) {
+            e++;
+        }
+        try {
+            return Double.parseDouble(json.substring(i, e));
+        } catch (RuntimeException ex) {
+            return -1;
+        }
+    }
+
+    /** بيشتغل بره الـ main thread. */
+    private void fetchPanel() {
+        if (!panelEnabled() || shuttingDown) {
+            return;
+        }
+        try {
+            if (limMemMb < 0) {
+                HttpResponse<String> r = HTTP.send(panelReq("").GET().build(), HttpResponse.BodyHandlers.ofString());
+                if (r.statusCode() == 401 || r.statusCode() == 403) {
+                    panelWarn("API Key غلط أو مالوش صلاحية على السيرفر (HTTP " + r.statusCode() + ")");
+                    return;
+                }
+                if (r.statusCode() == 404) {
+                    panelWarn("panel.server-id أو panel.url غلط (HTTP 404)");
+                    return;
+                }
+                if (r.statusCode() / 100 == 2) {
+                    String b = r.body();
+                    int li = b.indexOf("\"limits\"");
+                    if (li >= 0) {
+                        limMemMb = (long) num(b, li, "memory");
+                        limDiskMb = (long) num(b, li, "disk");
+                        limCpu = (long) num(b, li, "cpu");
+                    } else {
+                        limMemMb = 0;
+                        limDiskMb = 0;
+                        limCpu = 0;
+                    }
+                } else {
+                    panelWarn("فشل جلب بيانات اللوحة: HTTP " + r.statusCode());
+                    return;
+                }
+            }
+            HttpResponse<String> r = HTTP.send(panelReq("/resources").GET().build(), HttpResponse.BodyHandlers.ofString());
+            if (r.statusCode() / 100 != 2) {
+                panelWarn("فشل جلب الموارد من اللوحة: HTTP " + r.statusCode());
+                return;
+            }
+            String b = r.body();
+            double mem = num(b, 0, "memory_bytes");
+            double cpu = num(b, 0, "cpu_absolute");
+            double disk = num(b, 0, "disk_bytes");
+            double up = num(b, 0, "uptime");
+            if (mem < 0 || cpu < 0) {
+                panelWarn("رد اللوحة مش بالشكل المتوقع (مش Pterodactyl؟)");
+                return;
+            }
+            panelStats = new PanelStats((long) mem, cpu, (long) Math.max(0, disk), (long) Math.max(0, up),
+                    System.currentTimeMillis() / 1000L);
+            warnedPanel = false;
+        } catch (IOException ex) {
+            panelWarn("تعذر الاتصال باللوحة: " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        } catch (IllegalArgumentException ex) {
+            panelWarn("panel.url غير صحيح: " + ex.getMessage());
+        }
+    }
+
+    private static String fmtMb(long mb) {
+        return mb >= 1024 ? String.format(Locale.ROOT, "%.1f GB", mb / 1024.0) : mb + " MB";
+    }
+
+    private PanelStats freshPanel(long nowSec) {
+        PanelStats ps = panelStats;
+        long maxAge = Math.max(180, getConfig().getInt("update-interval-seconds", 30) * 3L);
+        return ps != null && nowSec - ps.fetchedSec() < maxAge ? ps : null;
     }
 
     private static String bar(int cur, int max) {
@@ -311,11 +480,40 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
                 }
                 f.add(field(c.getString("texts.f-performance", "الأداء"), perf, true));
             }
+            if (c.getBoolean("show-resources", true)) {
+                PanelStats ps = freshPanel(now);
+                if (ps != null) {
+                    long usedMb = ps.memBytes() / (1024 * 1024);
+                    String cpuStr = "**" + Math.round(ps.cpu()) + "%**" + (limCpu > 0 ? " / " + limCpu + "%" : "");
+                    String ramStr = "**" + fmtMb(usedMb) + "**" + (limMemMb > 0 ? " / " + fmtMb(limMemMb) : "");
+                    String res = "🖥️ CPU " + cpuStr + "\n🧠 RAM " + ramStr;
+                    if (c.getBoolean("panel.show-disk", true)) {
+                        long diskMb = ps.diskBytes() / (1024 * 1024);
+                        res += "\n💾 " + "**" + fmtMb(diskMb) + "**" + (limDiskMb > 0 ? " / " + fmtMb(limDiskMb) : "");
+                    }
+                    f.add(field(c.getString("texts.f-resources", "الموارد"), res, true));
+                } else {
+                    Runtime rt = Runtime.getRuntime();
+                    long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
+                    long maxMb = rt.maxMemory() / (1024 * 1024);
+                    String res = "🧠 **" + usedMb + "** / " + maxMb + " MB";
+                    if (ManagementFactory.getOperatingSystemMXBean() instanceof OperatingSystemMXBean os) {
+                        double cpu = os.getProcessCpuLoad();
+                        if (cpu >= 0) {
+                            res += "\n🖥️ CPU **" + Math.round(cpu * 100) + "%**";
+                        }
+                    }
+                    f.add(field(c.getString("texts.f-resources", "الموارد"), res, true));
+                }
+            }
             if (c.getBoolean("show-version", true)) {
                 f.add(field(c.getString("texts.f-version", "الإصدار"), Bukkit.getMinecraftVersion(), true));
             }
             if (c.getBoolean("show-uptime", true)) {
-                long startSec = ManagementFactory.getRuntimeMXBean().getStartTime() / 1000L;
+                PanelStats ups = freshPanel(now);
+                long startSec = ups != null && ups.uptimeMs() > 0
+                        ? now - ups.uptimeMs() / 1000L
+                        : ManagementFactory.getRuntimeMXBean().getStartTime() / 1000L;
                 f.add(field(c.getString("texts.f-uptime", "شغال من"), "<t:" + startSec + ":R>", true));
             }
             if (c.getBoolean("show-peak", true)) {
@@ -350,7 +548,12 @@ public final class StatusPlugin extends JavaPlugin implements Listener, TabExecu
             }
         }
 
-        String fullDesc = (desc.isBlank() ? "" : "**" + desc + "**\n")
+        String crashLine = "";
+        if (online && crashedAtSec > 0 && now < crashShownUntilSec) {
+            crashLine = c.getString("texts.crash-notice", "⚠️ رجع بعد وقوف مفاجئ، آخر مرة كان شغال:")
+                    + " <t:" + crashedAtSec + ":R>\n";
+        }
+        String fullDesc = (desc.isBlank() ? "" : "**" + desc + "**\n") + crashLine
                 + c.getString("texts.updated-prefix", "🕒 آخر تحديث:") + " <t:" + now + ":R>";
 
         StringBuilder embed = new StringBuilder();
